@@ -24,4 +24,9 @@ RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/root/.cache/pip \
     /app/fact_extractor/install.py
 
+WORKDIR /root/
+RUN git clone -b Draytek-Firmware https://github.com/snowy-connection/fact_helper_file.git
+RUN cat /root/fact_helper_file/fact_helper_file/mime/* > /app/fact_extractor/bin/firmware
+WORKDIR /app
+
 ENTRYPOINT ["/app/fact_extractor/docker_extraction.py"]
