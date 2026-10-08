@@ -5,6 +5,7 @@ This plugin unpacks all files via carving
 from __future__ import annotations
 
 import logging
+import re
 import traceback
 from itertools import chain
 from pathlib import Path
@@ -16,14 +17,14 @@ from unblob.extractor import carve_unknown_chunk, carve_valid_chunk
 from unblob.file_utils import File
 from unblob.finder import logger, search_chunks
 from unblob.handlers import BUILTIN_HANDLERS
-from unblob.models import Chunk, PaddingChunk, TaskResult, UnknownChunk
+from unblob.models import Chunk, PaddingChunk, TaskResult, UnknownChunk, ValidChunk
 from unblob.processing import Task, calculate_unknown_chunks, remove_inner_chunks
 
 from plugins.unpacking.generic_carver.internal.handlers import CUSTOM_HANDLERS
 
 NAME = 'generic_carver'
 MIME_PATTERNS = ['generic/carver']
-VERSION = '1.1.0'
+VERSION = '1.2.0'
 
 MIN_FILE_ENTROPY = 0.01
 
@@ -57,19 +58,31 @@ def unpack_function(file_path: str, tmp_dir: str) -> dict:
                     carve_unknown_chunk(extraction_dir, file, chunk)
                 else:
                     carve_valid_chunk(extraction_dir, file, chunk)
-                chunks.append(chunk.as_report(None).asdict())
+                chunks.append(chunk.as_report([] if isinstance(chunk, ValidChunk) else None).model_dump())
 
         report = _create_report(chunks) if chunks else 'No valid chunks found.'
         if filter_report:
             report += f'\nFiltered chunks:\n{filter_report}'
     except Exception as error:
         report = f'Error {error} during unblob extraction:\n{traceback.format_exc()}'
+    _rename_extracted_files(Path(tmp_dir), path.stat().st_size)
     return {'output': report}
+
+
+def _rename_extracted_files(tmp_dir: Path, filesize: int):
+    """Default filenames are not sortable. This Function adds leading zeroes to the offsets to fix this."""
+    pad_width = len(str(filesize))
+    name_regex = re.compile(r'(\d+)-(\d+)\.(.+)')
+    for file in tmp_dir.iterdir():
+        if match := name_regex.match(file.name):
+            start, end, extension = match.groups()
+            filename = f'{int(start):0{pad_width}d}-{int(end):0{pad_width}d}.{extension}'
+            file.rename(tmp_dir / filename)
 
 
 def _find_chunks(file_path: Path, file: File) -> Iterable[Chunk]:
     task = Task(path=file_path, depth=0, blob_id='')
-    known_chunks = remove_inner_chunks(search_chunks(file, file.size(), HANDLERS, TaskResult(task)))
+    known_chunks = remove_inner_chunks(search_chunks(file, file.size(), HANDLERS, TaskResult(task=task)))
     unknown_chunks = calculate_unknown_chunks(known_chunks, file.size())
     yield from chain(known_chunks, unknown_chunks)
 
